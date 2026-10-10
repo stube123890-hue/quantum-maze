@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maze Generator + Solver Demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 16px; background: #1a1a2e; color: #eee; }
+  h1 { font-size: 1.3rem; margin: 8px 0; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 12px 0; }
+  button { padding: 10px 16px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background: #4a7c59; color: #fff; }
+  button:hover { background: #3a6a49; }
+  button:disabled { background: #555; cursor: default; }
+  canvas { border: 2px solid #444; border-radius: 4px; max-width: 95vw; }
+  .stats { display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
+  .stat { text-align: center; }
+  .stat .label { font-size: 0.8rem; color: #aaa; }
+  .stat .value { font-size: 1.4rem; font-weight: bold; }
+  .bfs { color: #4da6ff; } .astar { color: #5fd97a; } .dfs { color: #ff9f43; }
+  p.hint { color: #888; font-size: 0.85rem; max-width: 600px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>Maze Generator + Solver</h1>
+<div class="controls">
+  <button id="genBtn">Generate new maze</button>
+  <button id="bfsBtn">Solve: BFS</button>
+  <button id="astarBtn">Solve: A*</button>
+  <button id="dfsBtn">Solve: DFS</button>
+</div>
+<canvas id="c"></canvas>
+<div class="stats">
+  <div class="stat"><div class="label">Algorithm</div><div class="value" id="algoName">—</div></div>
+  <div class="stat"><div class="label">Path length</div><div class="value" id="pathLen">—</div></div>
+  <div class="stat"><div class="label">Cells explored</div><div class="value" id="visited">—</div></div>
+  <div class="stat"><div class="label">Time</div><div class="value" id="timeMs">—</div></div>
+</div>
+<p class="hint">Recursive-backtracker maze (perfect: exactly one path between any two cells).
+BFS and A* always find the shortest path — A* just explores fewer cells.
+DFS is faster but its path wanders.</p>
+
+<script src="maze.js"></script>
+<script>
+const COLS = 25, ROWS = 18, CELL = 22;
+const canvas = document.getElementById('c');
+canvas.width = COLS * CELL + 2; canvas.height = ROWS * CELL + 2;
+const ctx = canvas.getContext('2d');
+let maze = new Maze(COLS, ROWS).generate();
+let animId = null;
+
+function draw(path, visitedOrder) {
+  ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // visited cells
+  if (visitedOrder) {
+    ctx.fillStyle = 'rgba(77,166,255,0.25)';
+    for (const [r, c] of visitedOrder) ctx.fillRect(c * CELL + 1, r * CELL + 1, CELL - 1, CELL - 1);
+  }
+  // path
+  if (path) {
+    ctx.fillStyle = '#5fd97a';
+    for (const [r, c] of path) {
+      ctx.beginPath();
+      ctx.arc(c * CELL + CELL / 2, r * CELL + CELL / 2, CELL / 4, 0, 7);
+      ctx.fill();
+    }
+  }
+  // walls
+  ctx.strokeStyle = '#eee'; ctx.lineWidth = 2; ctx.beginPath();
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const w = maze.walls[maze.key(r, c)];
+    const x = c * CELL, y = r * CELL;
+    if (w.n) { ctx.moveTo(x, y); ctx.lineTo(x + CELL, y); }
+    if (w.w) { ctx.moveTo(x, y); ctx.lineTo(x, y + CELL); }
+    if (r === ROWS - 1 && w.s) { ctx.moveTo(x, y + CELL); ctx.lineTo(x + CELL, y + CELL); }
+    if (c === COLS - 1 && w.e) { ctx.moveTo(x + CELL, y); ctx.lineTo(x + CELL, y + CELL); }
+  }
+  ctx.stroke();
+  // start / goal markers
+  ctx.fillStyle = '#4da6ff'; ctx.fillRect(4, 4, CELL - 8, CELL - 8);
+  ctx.fillStyle = '#ff5f5f';
+  ctx.fillRect((COLS - 1) * CELL + 4, (ROWS - 1) * CELL + 4, CELL - 8, CELL - 8);
+}
+
+// Re-run a solver while recording visit order for the animation.
+function solveWithOrder(fn) {
+  const t0 = performance.now();
+  const result = fn();
+  const ms = performance.now() - t0;
+  return { ...result, ms };
+}
+
+function animateSolve(name, colorClass, solverFn) {
+  if (animId) cancelAnimationFrame(animId);
+  document.getElementById('algoName').textContent = name;
+  document.getElementById('algoName').className = 'value ' + colorClass;
+  const { path, visitedCount, ms } = solveWithOrder(solverFn);
+  document.getElementById('pathLen').textContent = path ? path.length : '—';
+  document.getElementById('visited').textContent = visitedCount;
+  document.getElementById('timeMs').textContent = ms.toFixed(1) + ' ms';
+  // animate: reveal path progressively
+  let i = 0;
+  const step = Math.max(1, Math.floor(path.length / 60));
+  function frame() {
+    i += step;
+    draw(path.slice(0, i), null);
+    if (i < path.length) animId = requestAnimationFrame(frame);
+    else draw(path, null);
+  }
+  frame();
+}
+
+document.getElementById('genBtn').onclick = () => {
+  if (animId) cancelAnimationFrame(animId);
+  maze = new Maze(COLS, ROWS).generate();
+  draw(null, null);
+  for (const id of ['algoName', 'pathLen', 'visited', 'timeMs']) document.getElementById(id).textContent = '—';
+};
+document.getElementById('bfsBtn').onclick = () => animateSolve('BFS', 'bfs', () => maze.solveBFS());
+document.getElementById('astarBtn').onclick = () => animateSolve('A*', 'astar', () => maze.solveAStar());
+document.getElementById('dfsBtn').onclick = () => animateSolve('DFS', 'dfs', () => maze.solveDFS());
+
+draw(null, null);
+</script>
+</body>
+</html>
